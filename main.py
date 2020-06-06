@@ -1,5 +1,6 @@
 import discord
 import os
+from gtts import gTTS
 
 client = discord.Client()
 
@@ -21,6 +22,10 @@ def make_voice_pico(output_fname, msg):
 def make_voice_festival(output_fname, msg):
 	command = 'echo "{}" | text2wave -eval "(voice_cmu_us_slt_arctic_hts)" -o {}'.format(sanitize(msg), output_fname)
 	os.system(command)
+
+def make_voice_gtts(output_fname, msg):
+	tts = gTTS(msg)
+	tts.save(output_fname)
 
 @client.event
 async def on_message(message):
@@ -64,7 +69,10 @@ async def on_voice_state_update(member, before, after):
 			message = 'Goodbye {}.'.format(display_name)
 		
 		ofname = 'voice.wav'
-		make_voice_festival(ofname, message)
+		make_voice_gtts(ofname, message)
 		bot_client.play(discord.FFmpegOpusAudio(ofname))
 
-client.run('TOKEN HERE')
+if __name__ == '__main__':
+	with open('token.txt') as f:
+		token = f.readline().strip()
+	client.run(token)
