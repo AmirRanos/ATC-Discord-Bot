@@ -3,8 +3,43 @@ import os
 import asyncio
 from gtts import gTTS
 
+class Voice_Provider:
+	def say(self, msg):
+		raise NotImplementedError()
+
+	def sanitize(self, string):
+		retval = []
+		for c in string:
+			if c.lower() in 'abcdefghijklmnopqrstuvwxyz0123456789 ,.?!':
+				retval.append(c)
+		return ''.join(retval)
+		
+class Festival_Voice(Voice_Provider):
+	def say(self, msg):
+		output_fname = 'voice.wav'
+		command = 'echo "{}" | text2wave -eval "(voice_cmu_us_slt_arctic_hts)" -o {}'.format(self.sanitize(msg), output_fname)
+		os.system(command)
+		return output_fname
+		
+class GTTS_Voice(Voice_Provider):
+	def say(self, msg):
+		output_fname = 'voice.wav'
+		tts = gTTS(self.sanitize(msg))
+		tts.save(output_fname)
+		return output_fname
+		
+class Pico_Voice(Voice_Provider):
+	def say(self, msg):
+		output_fname = 'voice.wav'
+		command = 'pico2wave -w {} "{}"'.format(output_fname, self.sanitize(msg))
+		os.system(command)
+		return output_fname
 
 class Echo_Bot(discord.Client):
+	
+	def __init__(self):
+		self.voice_provider = Festival_Voice()
+		super().__init__()
 	
 	async def on_ready(self):
 		print('Logged in as {}'.format(self.user))
@@ -14,7 +49,7 @@ class Echo_Bot(discord.Client):
 			return
 			
 		if message.content.startswith('`atc'):
-			await join_voice_channel(self, message.author.voice.channel)
+			await self.join_voice_channel(message.author.voice.channel)
 		if message.content.startswith('`akill'):
 			await self.logout()
 
@@ -41,39 +76,17 @@ class Echo_Bot(discord.Client):
 			elif announce == 'leave':
 				message = 'Goodbye {}.'.format(display_name)
 			
-			ofname = 'voice.wav'
-			make_voice_festival(ofname, message)
+			ofname = self.voice_provider.say(message)
 			bot_client.play(discord.FFmpegOpusAudio(ofname))
 
-	
-
-def sanitize(string):
-	retval = []
-	for c in string:
-		if c.lower() in 'abcdefghijklmnopqrstuvwxyz0123456789 ,.?!':
-			retval.append(c)
-	return ''.join(retval)
-
-def make_voice_pico(output_fname, msg):
-	command = 'pico2wave -w {} "{}"'.format(output_fname, sanitize(msg))
-	os.system(command)
-	
-def make_voice_festival(output_fname, msg):
-	command = 'echo "{}" | text2wave -eval "(voice_cmu_us_slt_arctic_hts)" -o {}'.format(sanitize(msg), output_fname)
-	os.system(command)
-
-def make_voice_gtts(output_fname, msg):
-	tts = gTTS(msg)
-	tts.save(output_fname)
-
-async def join_voice_channel(client, voice_channel):
-	voice_client = voice_channel.guild.voice_client
-	if voice_client is None or voice_client.channel != voice_channel:
-		try:
-			voice_client = await voice_channel.connect()
-		except discord.client.ClientException as e:
-			pass
-	return voice_client
+	async def join_voice_channel(self, voice_channel):
+		voice_client = voice_channel.guild.voice_client
+		if voice_client is None or voice_client.channel != voice_channel:
+			try:
+				voice_client = await voice_channel.connect()
+			except discord.client.ClientException as e:
+				pass
+		return voice_client
 
 async def main():
 	with open('token.txt') as f:
