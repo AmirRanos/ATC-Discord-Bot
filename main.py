@@ -55,6 +55,8 @@ class Echo_Bot(discord.Client):
 	async def on_voice_state_update(self, member, before, after):
 		print(member, before.channel, after.channel)
 		
+		self.priority -= 1
+		
 		announce = None
 		
 		bot_client = member.guild.voice_client
@@ -127,8 +129,13 @@ class Echo_Bot_Controller:
 			
 	async def on_message(self, message):
 		if message.content.startswith('`atc'):
-			bot = self.get_available_bot(lambda bot: len(bot.voice_clients) == 0)
-			await bot.join_voice_channel(message.author.voice.channel)
+			voice_channel = message.author.voice.channel
+			
+			bot_already_connected = self.get_available_bot(lambda bot: voice_channel in [x.channel for x in bot.voice_clients])
+			if bot_already_connected is None:
+				
+				bot = self.get_available_bot(lambda bot: len(bot.voice_clients) == 0)
+				await bot.join_voice_channel(message.author.voice.channel)
 		
 		#if message.content.startswith('`akill'):
 		#	await self.logout()
