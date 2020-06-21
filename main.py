@@ -1,11 +1,15 @@
 import discord
 import os
+import random
 import asyncio
 from gtts import gTTS
 
 class Voice_Provider:
 	def say(self, msg):
 		raise NotImplementedError()
+
+	def get_output_filename(self):
+		return 'voice_{}.wav'.format(random.randint(0, 9999999))
 
 	def sanitize(self, string):
 		retval = []
@@ -16,21 +20,21 @@ class Voice_Provider:
 		
 class Festival_Voice(Voice_Provider):
 	def say(self, msg):
-		output_fname = 'voice.wav'
+		output_fname = self.get_output_filename()
 		command = 'echo "{}" | text2wave -eval "(voice_cmu_us_slt_arctic_hts)" -o {}'.format(self.sanitize(msg), output_fname)
 		os.system(command)
 		return output_fname
 		
 class GTTS_Voice(Voice_Provider):
 	def say(self, msg):
-		output_fname = 'voice.wav'
+		output_fname = self.get_output_filename()
 		tts = gTTS(self.sanitize(msg))
 		tts.save(output_fname)
 		return output_fname
 		
 class Pico_Voice(Voice_Provider):
 	def say(self, msg):
-		output_fname = 'voice.wav'
+		output_fname = self.get_output_filename()
 		command = 'pico2wave -w {} "{}"'.format(output_fname, self.sanitize(msg))
 		os.system(command)
 		return output_fname
@@ -103,6 +107,17 @@ class Echo_Bot(discord.Client):
 			raise RuntimeError('No text channel with ID: {}'.format(text_channel.id))
 			
 		await text_channel.send(msg)
+		
+	def check_is_active(self):
+		if len(self.voice_clients) == 0:
+			return False
+		else:
+			for client in self.voice_clients:
+				channel = client.channel
+				for member in channel.members:
+					if not member.bot:
+						return True
+			return False
 
 class Echo_Bot_Controller:
 	
@@ -119,7 +134,16 @@ class Echo_Bot_Controller:
 			print('Starting worker bot...')
 			bot = Echo_Bot(self)
 			self.worker_bots[token] = bot
-			await bot.start(token)
+			
+			async def bot_restarter():
+				while not bot.is_closed():
+					await asyncio.sleep(random.randint(60, 10*60))
+					if not bot.check_is_active():
+						await bot.logout()
+						print('Shutdown bot for inactivity')
+						break
+			
+			await asyncio.gather(bot.start(token), bot_restarter())
 			
 	def get_bot_with(self, checker):
 		'''
@@ -131,7 +155,7 @@ class Echo_Bot_Controller:
 		best_bot = None
 		best_priority = None
 		for _, bot in self.worker_bots.items():
-			if checker(bot):
+			if not bot.is_closed() and checker(bot):
 				if best_bot is None or bot.priority > best_priority:
 					best_priority = bot.priority
 					best_bot = bot
@@ -152,15 +176,7 @@ class Echo_Bot_Controller:
 		Get a bot that is not connected to the given voice channel or is connected to an empty voice channel
 		'''
 		def checker(bot):
-			if len(bot.voice_clients) == 0:
-				return True
-			else:
-				for client in bot.voice_clients:
-					channel = client.channel
-					for member in channel.members:
-						if not member.bot:
-							return False
-				return True
+			return not bot.check_is_active()
 		
 		return self.get_bot_with(checker)
 		
