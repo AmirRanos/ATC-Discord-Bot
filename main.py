@@ -80,7 +80,7 @@ class Echo_Bot(discord.Client):
 			ofname = self.voice_provider.say(message)
 			bot_client.play(discord.FFmpegOpusAudio(ofname))
 
-	async def join_voice_channel(self, voice_channel):
+	async def external_join_voice_channel(self, voice_channel):
 		
 		voice_client = None
 		for vc in self.voice_clients:
@@ -92,6 +92,17 @@ class Echo_Bot(discord.Client):
 			except discord.client.ClientException as e:
 				pass
 		return voice_client
+		
+	async def external_send_message(self, text_channel, msg):
+		
+		text_channel = self.get_channel(text_channel.id)
+		if text_channel is None:
+			raise RuntimeError('Cannot find channel with ID: {}'.format(text_channel.id))
+		
+		if not isinstance(text_channel, discord.TextChannel):
+			raise RuntimeError('No text channel with ID: {}'.format(text_channel.id))
+			
+		await text_channel.send(msg)
 
 class Echo_Bot_Controller:
 	
@@ -110,7 +121,7 @@ class Echo_Bot_Controller:
 			self.worker_bots[token] = bot
 			await bot.start(token)
 			
-	def get_available_bot(self, checker):
+	def get_bot_with(self, checker):
 		'''
 		Get the bot with the highest priority that passes checker()
 		
@@ -126,16 +137,51 @@ class Echo_Bot_Controller:
 					best_bot = bot
 					
 		return best_bot
+		
+	def get_bot_already_connected(self, voice_channel):
+		'''
+		Get the bot that is connected to the given voice channel, or None if there isn't one
+		'''
+		
+		def checker(bot):
+			return voice_channel in [x.channel for x in bot.voice_clients]
+		return self.get_bot_with(checker)
+		
+	def get_bot_idling(self):
+		'''
+		Get a bot that is not connected to the given voice channel or is connected to an empty voice channel
+		'''
+		def checker(bot):
+			if len(bot.voice_clients) == 0:
+				return True
+			else:
+				for client in bot.voice_clients:
+					channel = client.channel
+					for member in channel.members:
+						if not member.bot:
+							return False
+				return True
+		
+		return self.get_bot_with(checker)
+		
+	def get_bot_any(self):
+		return self.get_bot_with(lambda x: True)
+		
 			
 	async def on_message(self, message):
 		if message.content.startswith('`atc'):
 			voice_channel = message.author.voice.channel
 			
-			bot_already_connected = self.get_available_bot(lambda bot: voice_channel in [x.channel for x in bot.voice_clients])
+			bot_already_connected = self.get_bot_already_connected(voice_channel)
 			if bot_already_connected is None:
+				bot = self.get_bot_idling()
 				
-				bot = self.get_available_bot(lambda bot: len(bot.voice_clients) == 0)
-				await bot.join_voice_channel(message.author.voice.channel)
+				if bot is None:
+					bot = self.get_bot_any()
+					await bot.external_send_message(message.channel, 'No available bots.')
+				else:
+					await bot.external_join_voice_channel(message.author.voice.channel)
+					await bot.external_send_message(message.channel, 'Hello!')
 		
 		#if message.content.startswith('`akill'):
 		#	await self.logout()
