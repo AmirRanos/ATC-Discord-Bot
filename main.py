@@ -37,7 +37,8 @@ class Pico_Voice(Voice_Provider):
 
 class Echo_Bot(discord.Client):
 	
-	def __init__(self, controller, voice_provider=Festival_Voice()):
+	def __init__(self, controller, voice_provider=Festival_Voice(), priority=0):
+		self.priority = priority
 		self.controller = controller
 		self.voice_provider = voice_provider
 		super().__init__()
@@ -48,11 +49,8 @@ class Echo_Bot(discord.Client):
 	async def on_message(self, message):
 		if message.author.bot:
 			return
-			
-		if message.content.startswith('`atc'):
-			await self.join_voice_channel(message.author.voice.channel)
-		if message.content.startswith('`akill'):
-			await self.logout()
+		
+		await self.controller.on_message(message)
 
 	async def on_voice_state_update(self, member, before, after):
 		print(member, before.channel, after.channel)
@@ -81,7 +79,11 @@ class Echo_Bot(discord.Client):
 			bot_client.play(discord.FFmpegOpusAudio(ofname))
 
 	async def join_voice_channel(self, voice_channel):
-		voice_client = voice_channel.guild.voice_client
+		
+		voice_client = None
+		for vc in self.voice_clients:
+			if vc.guild == voice_channel.guild:
+				voice_client = vc
 		if voice_client is None or voice_client.channel != voice_channel:
 			try:
 				voice_client = await voice_channel.connect()
@@ -94,6 +96,7 @@ class Echo_Bot_Controller:
 	def __init__(self, tokens):
 		self.tokens = tokens
 		self.running = True
+		self.worker_bots = {}
 		
 	async def run(self):
 		await asyncio.gather(*[self.handle_one_bot(token) for token in self.tokens])
@@ -102,7 +105,33 @@ class Echo_Bot_Controller:
 		while self.running:
 			print('Starting worker bot...')
 			bot = Echo_Bot(self)
+			self.worker_bots[token] = bot
 			await bot.start(token)
+			
+	def get_available_bot(self, checker):
+		'''
+		Get the bot with the highest priority that passes checker()
+		
+		or None if none exists
+		'''
+		
+		best_bot = None
+		best_priority = None
+		for _, bot in self.worker_bots.items():
+			if checker(bot):
+				if best_bot is None or bot.priority > best_priority:
+					best_priority = bot.priority
+					best_bot = bot
+					
+		return best_bot
+			
+	async def on_message(self, message):
+		if message.content.startswith('`atc'):
+			bot = self.get_available_bot(lambda bot: len(bot.voice_clients) == 0)
+			await bot.join_voice_channel(message.author.voice.channel)
+		
+		#if message.content.startswith('`akill'):
+		#	await self.logout()
 		
 
 async def main():
