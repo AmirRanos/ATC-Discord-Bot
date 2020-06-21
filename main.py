@@ -137,8 +137,11 @@ class Echo_Bot_Controller:
 async def main():
 	tokens = []
 	with open('tokens.txt') as f:
-		token = f.readline().strip()
-		tokens.append(token)
+		tokens = f.readlines()
+		tokens = [x.strip() for x in tokens]
+		tokens = [x for x in tokens if len(x) > 0]
+		
+	print('Tokens: {}'.format(len(tokens)))
 		
 	bot_controller = Echo_Bot_Controller(tokens)
 	await bot_controller.run()
