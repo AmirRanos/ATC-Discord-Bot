@@ -2,8 +2,8 @@ import discord
 import os
 from gtts import gTTS
 
+
 class Echo_Bot(discord.Client):
-	
 	
 	async def on_ready(self):
 		print('Logged in as {}'.format(self.user))
@@ -39,7 +39,7 @@ class Echo_Bot(discord.Client):
 				message = 'Goodbye {}.'.format(display_name)
 			
 			ofname = 'voice.wav'
-			make_voice_gtts(ofname, message)
+			make_voice_festival(ofname, message)
 			bot_client.play(discord.FFmpegOpusAudio(ofname))
 
 	
