@@ -106,10 +106,12 @@ class Echo_Bot_Controller:
 		
 
 async def main():
-	with open('token.txt') as f:
+	tokens = []
+	with open('tokens.txt') as f:
 		token = f.readline().strip()
+		tokens.append(token)
 		
-	bot_controller = Echo_Bot_Controller([token])
+	bot_controller = Echo_Bot_Controller(tokens)
 	await bot_controller.run()
 
 if __name__ == '__main__':
