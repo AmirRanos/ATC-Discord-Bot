@@ -37,8 +37,9 @@ class Pico_Voice(Voice_Provider):
 
 class Echo_Bot(discord.Client):
 	
-	def __init__(self):
-		self.voice_provider = Festival_Voice()
+	def __init__(self, controller, voice_provider=Festival_Voice()):
+		self.controller = controller
+		self.voice_provider = voice_provider
 		super().__init__()
 	
 	async def on_ready(self):
@@ -88,12 +89,28 @@ class Echo_Bot(discord.Client):
 				pass
 		return voice_client
 
+class Echo_Bot_Controller:
+	
+	def __init__(self, tokens):
+		self.tokens = tokens
+		self.running = True
+		
+	async def run(self):
+		await asyncio.gather(*[self.handle_one_bot(token) for token in self.tokens])
+		
+	async def handle_one_bot(self, token):
+		while self.running:
+			print('Starting worker bot...')
+			bot = Echo_Bot(self)
+			await bot.start(token)
+		
+
 async def main():
 	with open('token.txt') as f:
 		token = f.readline().strip()
 		
-	bot = Echo_Bot()
-	await bot.start(token)
+	bot_controller = Echo_Bot_Controller([token])
+	await bot_controller.run()
 
 if __name__ == '__main__':
 	asyncio.run(main())
