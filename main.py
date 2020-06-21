@@ -2,11 +2,47 @@ import discord
 import os
 from gtts import gTTS
 
-client = discord.Client()
+class Echo_Bot(discord.Client):
+	
+	
+	async def on_ready(self):
+		print('Logged in as {}'.format(self.user))
+		
+	async def on_message(self, message):
+		if message.author.bot:
+			return
+			
+		if message.content.startswith('`atc'):
+			await join_voice_channel(self, message.author.voice.channel)
 
-@client.event
-async def on_ready():
-	print('Logged in as {}'.format(client.user))
+	async def on_voice_state_update(self, member, before, after):
+		print(member, before.channel, after.channel)
+		
+		announce = None
+		
+		bot_client = member.guild.voice_client
+		if bot_client is not None:
+			if after.channel != before.channel:
+				if after.channel == bot_client.channel:
+					announce = 'join'
+				elif before.channel == bot_client.channel:
+					announce = 'leave'
+				
+		if announce is not None:
+			message = ''
+			display_name = member.display_name
+			if member.bot:
+				display_name = 'service droid'
+			if announce == 'join':
+				message = 'Welcome {}.'.format(display_name)
+			elif announce == 'leave':
+				message = 'Goodbye {}.'.format(display_name)
+			
+			ofname = 'voice.wav'
+			make_voice_gtts(ofname, message)
+			bot_client.play(discord.FFmpegOpusAudio(ofname))
+
+	
 
 def sanitize(string):
 	retval = []
@@ -27,14 +63,6 @@ def make_voice_gtts(output_fname, msg):
 	tts = gTTS(msg)
 	tts.save(output_fname)
 
-@client.event
-async def on_message(message):
-	if message.author.bot:
-		return
-		
-	if message.content.startswith('`atc'):
-		await join_voice_channel(client, message.author.voice.channel)
-
 async def join_voice_channel(client, voice_channel):
 	voice_client = voice_channel.guild.voice_client
 	if voice_client is None or voice_client.channel != voice_channel:
@@ -44,35 +72,8 @@ async def join_voice_channel(client, voice_channel):
 			pass
 	return voice_client
 
-@client.event
-async def on_voice_state_update(member, before, after):
-	print(member, before.channel, after.channel)
-	
-	announce = None
-	
-	bot_client = member.guild.voice_client
-	if bot_client is not None:
-		if after.channel != before.channel:
-			if after.channel == bot_client.channel:
-				announce = 'join'
-			elif before.channel == bot_client.channel:
-				announce = 'leave'
-			
-	if announce is not None:
-		message = ''
-		display_name = member.display_name
-		if member.bot:
-			display_name = 'service droid'
-		if announce == 'join':
-			message = 'Welcome {}.'.format(display_name)
-		elif announce == 'leave':
-			message = 'Goodbye {}.'.format(display_name)
-		
-		ofname = 'voice.wav'
-		make_voice_gtts(ofname, message)
-		bot_client.play(discord.FFmpegOpusAudio(ofname))
-
 if __name__ == '__main__':
 	with open('token.txt') as f:
 		token = f.readline().strip()
+	client = Echo_Bot()
 	client.run(token)
