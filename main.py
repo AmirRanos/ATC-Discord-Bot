@@ -1,5 +1,6 @@
 import discord
 import os
+import asyncio
 from gtts import gTTS
 
 
@@ -14,6 +15,8 @@ class Echo_Bot(discord.Client):
 			
 		if message.content.startswith('`atc'):
 			await join_voice_channel(self, message.author.voice.channel)
+		if message.content.startswith('`akill'):
+			await self.logout()
 
 	async def on_voice_state_update(self, member, before, after):
 		print(member, before.channel, after.channel)
@@ -72,8 +75,12 @@ async def join_voice_channel(client, voice_channel):
 			pass
 	return voice_client
 
-if __name__ == '__main__':
+async def main():
 	with open('token.txt') as f:
 		token = f.readline().strip()
-	client = Echo_Bot()
-	client.run(token)
+		
+	bot = Echo_Bot()
+	await bot.start(token)
+
+if __name__ == '__main__':
+	asyncio.run(main())
