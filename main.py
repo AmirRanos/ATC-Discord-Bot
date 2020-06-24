@@ -4,6 +4,7 @@ import discord
 import os
 import random
 import asyncio
+import os.path
 from gtts import gTTS
 
 class Voice_Provider:
@@ -41,9 +42,30 @@ class Pico_Voice(Voice_Provider):
 		os.system(command)
 		return output_fname
 
+class Custom_Voice(Voice_Provider):
+	def __init__(self, file_dir, fallback):
+		self.file_dir = file_dir
+		self.fallback = fallback
+	
+	def get_fname(self, msg):
+		retval = []
+		msg = msg.lower()
+		for c in msg:
+			if c in 'abcdefghijklmnopqrstuvwxyz ':
+				retval.append(c)
+		return ''.join(retval)
+	
+	def say(self, msg):
+		custom_fname = os.path.join(self.file_dir, '{}.wav'.format(self.get_fname(self.sanitize(msg))))
+		print(custom_fname)
+		if os.path.exists(custom_fname):
+			return custom_fname
+		else:
+			return self.fallback.say(msg)
+
 class Echo_Bot(discord.Client):
 	
-	def __init__(self, controller, voice_provider=Festival_Voice(), priority=0):
+	def __init__(self, controller, voice_provider, priority=0):
 		self.priority = priority
 		self.controller = controller
 		self.voice_provider = voice_provider
@@ -83,16 +105,16 @@ class Echo_Bot(discord.Client):
 			if member.bot:
 				display_name = 'service droid'
 			if announce == 'join':
-				message = 'Welcome {}.'.format(display_name)
+				message = 'Welcome {}'.format(display_name)
 			elif announce == 'leave':
-				message = 'Goodbye {}.'.format(display_name)
+				message = 'Goodbye {}'.format(display_name)
 			
 			ofname = self.voice_provider.say(message)
 			bot_client.play(discord.FFmpegOpusAudio(ofname))
 			
 	async def external_announce_self(self, voice_channel):
 		voice_client = voice_channel.guild.voice_client
-		ofname = self.voice_provider.say('Hello world.')
+		ofname = self.voice_provider.say('Hello world')
 		voice_client.play(discord.FFmpegOpusAudio(ofname))
 		
 
@@ -133,8 +155,9 @@ class Echo_Bot(discord.Client):
 
 class Echo_Bot_Controller:
 	
-	def __init__(self, tokens):
+	def __init__(self, tokens, voice_provider):
 		self.tokens = tokens
+		self.voice_provider = voice_provider
 		self.running = True
 		self.worker_bots = {}
 		
@@ -145,7 +168,7 @@ class Echo_Bot_Controller:
 		while self.running:
 			try:
 				print('Starting worker bot...')
-				bot = Echo_Bot(self)
+				bot = Echo_Bot(self, self.voice_provider)
 				self.worker_bots[token] = bot
 				
 				async def bot_restarter():
@@ -228,7 +251,9 @@ async def main():
 		
 	print('Tokens: {}'.format(len(tokens)))
 		
-	bot_controller = Echo_Bot_Controller(tokens)
+	voice_provider = Custom_Voice('custom', Festival_Voice())
+		
+	bot_controller = Echo_Bot_Controller(tokens, voice_provider)
 	await bot_controller.run()
 
 if __name__ == '__main__':
