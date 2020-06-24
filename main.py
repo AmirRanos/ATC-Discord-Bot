@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import discord
 import os
 import random
@@ -131,19 +133,22 @@ class Echo_Bot_Controller:
 		
 	async def handle_one_bot(self, token):
 		while self.running:
-			print('Starting worker bot...')
-			bot = Echo_Bot(self)
-			self.worker_bots[token] = bot
-			
-			async def bot_restarter():
-				while not bot.is_closed():
-					await asyncio.sleep(random.randint(60, 10*60))
-					if not bot.check_is_active():
-						await bot.logout()
-						print('Shutdown bot for inactivity')
-						break
-			
-			await asyncio.gather(bot.start(token), bot_restarter())
+			try:
+				print('Starting worker bot...')
+				bot = Echo_Bot(self)
+				self.worker_bots[token] = bot
+				
+				async def bot_restarter():
+					while not bot.is_closed():
+						await asyncio.sleep(random.randint(60, 60*60))
+						if not bot.check_is_active():
+							await bot.logout()
+							print('Shutdown bot for inactivity')
+							break
+				
+				await asyncio.gather(bot.start(token), bot_restarter())
+			except RuntimeError as e:
+				print(e.what)
 			
 	def get_bot_with(self, checker):
 		'''
