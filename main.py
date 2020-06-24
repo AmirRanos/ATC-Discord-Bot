@@ -63,6 +63,10 @@ class Echo_Bot(discord.Client):
 		
 		self.priority -= 1
 		
+		if member == self.user:
+			print('Not greeting self')
+			return
+		
 		announce = None
 		
 		bot_client = member.guild.voice_client
@@ -85,6 +89,12 @@ class Echo_Bot(discord.Client):
 			
 			ofname = self.voice_provider.say(message)
 			bot_client.play(discord.FFmpegOpusAudio(ofname))
+			
+	async def external_announce_self(self, voice_channel):
+		voice_client = voice_channel.guild.voice_client
+		ofname = self.voice_provider.say('Hello world.')
+		voice_client.play(discord.FFmpegOpusAudio(ofname))
+		
 
 	async def external_join_voice_channel(self, voice_channel):
 		
@@ -202,6 +212,7 @@ class Echo_Bot_Controller:
 					await bot.external_send_message(message.channel, 'No available bots.')
 				else:
 					await bot.external_join_voice_channel(message.author.voice.channel)
+					await bot.external_announce_self(message.author.voice.channel)
 					await bot.external_send_message(message.channel, 'Hello!')
 		
 		#if message.content.startswith('`akill'):
