@@ -63,12 +63,46 @@ class Custom_Voice(Voice_Provider):
 		else:
 			return self.fallback.say(msg)
 
+class Greeter_Queue:
+	
+	def __init__(self):
+		self._queue = []
+		
+	def _erase_element(self, elem):
+		self._queue = [x for x in self._queue if x != elem]
+		
+	def pop_front(self):
+		if len(self._queue) == 0:
+			return None
+		
+		return ''.join(self._queue.pop(0))
+		
+	def peek_front(self):
+		if len(self._queue) == 0:
+			return None
+		
+		return ''.join(self._queue[0])
+		
+	def clear_all(self):
+		self._queue.clear()
+		
+	def add_welcome(self, name):
+		self._erase_element(('Goodbye ', name))
+		self._queue.append(('Welcome ', name))
+		
+	def add_goodbye(self, name):
+		self._erase_element(('Welcome ', name))
+		self._queue.append(('Goodbye ', name))
+	
+			
+
 class Echo_Bot(discord.Client):
 	
 	def __init__(self, controller, voice_provider, priority=0):
 		self.priority = priority
 		self.controller = controller
 		self.voice_provider = voice_provider
+		self.greeter_queue = Greeter_Queue()
 		super().__init__()
 	
 	async def on_ready(self):
@@ -80,23 +114,44 @@ class Echo_Bot(discord.Client):
 		
 		await self.controller.on_message(message)
 
+	async def _process_greeter_queue(self, voice_client):
+		while self.greeter_queue.peek_front() is not None:
+			message = self.greeter_queue.peek_front()
+			while voice_client.is_playing():
+				await asyncio.sleep(0.1)
+			
+			nobody_there = all(x.bot for x in voice_client.channel.members)
+			if nobody_there:
+				self.greeter_queue.clear_all()
+				print('Clearing queue since nobody is there to hear anything')
+			else:
+				ofname = self.voice_provider.say(message)
+				try:
+					voice_client.play(discord.FFmpegOpusAudio(ofname))
+					self.greeter_queue.pop_front()
+				except discord.errors.ClientException:
+					await asyncio.sleep(0.1)
+
 	async def on_voice_state_update(self, member, before, after):
 		print(member, before.channel, after.channel)
 		
 		self.priority -= 1
 		
 		if member == self.user:
+			# Clear out queue if moving to a different channel
+			if after.channel != before.channel:
+				self.greeter_queue.clear_all()
 			print('Not greeting self')
 			return
 		
 		announce = None
 		
-		bot_client = member.guild.voice_client
-		if bot_client is not None:
+		voice_client = member.guild.voice_client
+		if voice_client is not None:
 			if after.channel != before.channel:
-				if after.channel == bot_client.channel:
+				if after.channel == voice_client.channel:
 					announce = 'join'
-				elif before.channel == bot_client.channel:
+				elif before.channel == voice_client.channel:
 					announce = 'leave'
 				
 		if announce is not None:
@@ -104,13 +159,19 @@ class Echo_Bot(discord.Client):
 			display_name = member.display_name
 			if member.bot:
 				display_name = 'service droid'
-			if announce == 'join':
-				message = 'Welcome {}'.format(display_name)
-			elif announce == 'leave':
-				message = 'Goodbye {}'.format(display_name)
+				
 			
-			ofname = self.voice_provider.say(message)
-			bot_client.play(discord.FFmpegOpusAudio(ofname))
+			if announce == 'join':
+				self.greeter_queue.add_welcome(display_name)
+			elif announce == 'leave':
+				self.greeter_queue.add_goodbye(display_name)
+				
+			# Small heuristic: if there is only one person left in the room, and we are announcing that they joined,
+			# then wait for a small time so that the voice does not get cut out by latency
+			if sum(1 for x in voice_client.channel.members if not x.bot) == 1:
+				await asyncio.sleep(1)
+				
+			await self._process_greeter_queue(voice_client)
 			
 	async def external_announce_self(self, voice_channel):
 		voice_client = voice_channel.guild.voice_client
