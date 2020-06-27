@@ -330,21 +330,33 @@ class Echo_Bot_Controller:
 		#	await self.logout()
 		
 
+def create_default_config_if_none_exists():
+	with open('tokens.txt', 'a+') as f:
+		pass
+	with open('admins.txt', 'a+') as f:
+		pass
+
 async def main():
+	create_default_config_if_none_exists()
+	
 	tokens = []
-	with open('tokens.txt') as f:
+	with open('tokens.txt', 'r') as f:
 		tokens = f.readlines()
 		tokens = [x.strip() for x in tokens]
 		tokens = [x for x in tokens if len(x) > 0]
 		
 	admin_ids = []
-	with open('admins.txt') as f:
+	with open('admins.txt', 'r') as f:
 		admin_ids = f.readlines()
 		admin_ids = [x.strip() for x in admin_ids]
 		admin_ids = [int(x) for x in admin_ids if len(x) > 0]
 		
 	print('Tokens: {}'.format(len(tokens)))
 	print('Admins: {}'.format(admin_ids))
+	
+	if len(tokens) == 0:
+		print('Error: At least one bot token must be provided in tokens.txt')
+		return
 		
 	voice_provider = Custom_Voice('custom', Festival_Voice())
 		
