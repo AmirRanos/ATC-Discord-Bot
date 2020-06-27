@@ -180,8 +180,12 @@ class Echo_Bot(discord.Client):
 			
 	async def external_announce_self(self, voice_channel):
 		voice_client = voice_channel.guild.voice_client
-		ofname = self.voice_provider.say('Hello world')
-		voice_client.play(discord.FFmpegOpusAudio(ofname))
+		if voice_client is not None:
+			try:
+				ofname = self.voice_provider.say('ATC Online')
+				voice_client.play(discord.FFmpegOpusAudio(ofname))
+			except discord.errors.ClientException:
+				pass
 		
 
 	async def external_join_voice_channel(self, voice_channel):
@@ -224,17 +228,18 @@ class Echo_Bot_Controller:
 	def __init__(self, config):
 		self.config = config
 		self.running = True
+		self.voice_provider = make_voice_from_name(self.config.voice_selection)
 		self.worker_bots = {}
+		self.last_cmd_message = None
 		
 	async def run(self):
-		voice_provider = make_voice_from_name(self.config.voice_selection)
-		await asyncio.gather(*[self.handle_one_bot(token, voice_provider) for token in self.config.tokens])
+		await asyncio.gather(*[self.handle_one_bot(token) for token in self.config.tokens])
 		
-	async def handle_one_bot(self, token, voice_provider):
+	async def handle_one_bot(self, token):
 		while self.running:
 			try:
 				print('Starting worker bot...')
-				bot = Echo_Bot(self, voice_provider)
+				bot = Echo_Bot(self, self.voice_provider)
 				self.worker_bots[token] = bot
 				
 				async def bot_restarter():
@@ -309,23 +314,32 @@ class Echo_Bot_Controller:
 				await bot.external_announce_self(message.author.voice.channel)
 				await bot.external_send_message(message.channel, 'Hello!')
 		
-	def cmd_set_voice(self, cmd_args):
+	async def cmd_set_voice(self, message, cmd_args):
 		voice = DEFAULT_VOICE_NAME
 		if len(cmd_args) >= 3:
 			voice = cmd_args[2].lower()
 		
 		self.config.voice_selection = voice
 		self.config.save_config()
-		voice_provider = make_voice_from_name(self.config.voice_selection)
+		self.voice_provider = make_voice_from_name(self.config.voice_selection)
 		
 		for token, bot in self.worker_bots.items():
-			bot.voice_provider = voice_provider
+			bot.voice_provider = self.voice_provider
+			
+		# Done after we set the voice providers
+		# In order to ensure that the update reaches all bots
+		for token, bot in self.worker_bots.items():
+			await bot.external_announce_self(message.author.voice.channel)
 			
 	async def on_message(self, message):
 		cmd_args = message.content.split(' ')
 		cmd_args = [x for x in cmd_args if len(x) > 0]
 		
 		if len(cmd_args) >= 1 and cmd_args[0] == '`atc':
+			
+			if message is self.last_cmd_message:
+				return
+			self.last_cmd_message = message
 			
 			cmd = 'join'
 			
@@ -339,7 +353,7 @@ class Echo_Bot_Controller:
 					await self.shutdown()
 			elif cmd == 'voice':
 				if message.author.id in self.config.admin_ids:
-					self.cmd_set_voice(cmd_args)
+					await self.cmd_set_voice(message, cmd_args)
 			elif cmd == 'join':
 				await self.cmd_join(message)
 			
