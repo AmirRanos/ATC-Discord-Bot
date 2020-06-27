@@ -7,12 +7,16 @@ import asyncio
 import os.path
 from gtts import gTTS
 
+DEFAULT_VOICE_NAME = 'festival'
+
 class Voice_Provider:
 	def say(self, msg):
 		raise NotImplementedError()
 
 	def get_output_filename(self):
-		return 'voice_{}.wav'.format(random.randint(0, 9999999))
+		temp_dir = 'temp'
+		create_folder_if_none_exists(temp_dir)
+		return '{}/voice_{}.wav'.format(temp_dir, random.randint(0, 9999999))
 
 	def sanitize(self, string):
 		retval = []
@@ -217,21 +221,20 @@ class Echo_Bot(discord.Client):
 
 class Echo_Bot_Controller:
 	
-	def __init__(self, tokens, voice_provider, admins):
-		self.tokens = tokens
-		self.voice_provider = voice_provider
+	def __init__(self, config):
+		self.config = config
 		self.running = True
 		self.worker_bots = {}
-		self.admins = admins
 		
 	async def run(self):
-		await asyncio.gather(*[self.handle_one_bot(token) for token in self.tokens])
+		voice_provider = make_voice_from_name(self.config.voice_selection)
+		await asyncio.gather(*[self.handle_one_bot(token, voice_provider) for token in self.config.tokens])
 		
-	async def handle_one_bot(self, token):
+	async def handle_one_bot(self, token, voice_provider):
 		while self.running:
 			try:
 				print('Starting worker bot...')
-				bot = Echo_Bot(self, self.voice_provider)
+				bot = Echo_Bot(self, voice_provider)
 				self.worker_bots[token] = bot
 				
 				async def bot_restarter():
@@ -306,6 +309,17 @@ class Echo_Bot_Controller:
 				await bot.external_announce_self(message.author.voice.channel)
 				await bot.external_send_message(message.channel, 'Hello!')
 		
+	def cmd_set_voice(self, cmd_args):
+		voice = DEFAULT_VOICE_NAME
+		if len(cmd_args) >= 3:
+			voice = cmd_args[2].lower()
+		
+		self.config.voice_selection = voice
+		self.config.save_config()
+		voice_provider = make_voice_from_name(self.config.voice_selection)
+		
+		for token, bot in self.worker_bots.items():
+			bot.voice_provider = voice_provider
 			
 	async def on_message(self, message):
 		cmd_args = message.content.split(' ')
@@ -316,51 +330,96 @@ class Echo_Bot_Controller:
 			cmd = 'join'
 			
 			if len(cmd_args) >= 2:
-				commands = ['shutdown', 'join']
+				commands = ['shutdown', 'join', 'voice']
 				if cmd_args[1].lower() in commands:
 					cmd = cmd_args[1]
 			
 			if cmd == 'shutdown':
-				if message.author.id in self.admins:
+				if message.author.id in self.config.admin_ids:
 					await self.shutdown()
+			elif cmd == 'voice':
+				if message.author.id in self.config.admin_ids:
+					self.cmd_set_voice(cmd_args)
 			elif cmd == 'join':
 				await self.cmd_join(message)
 			
 		#if message.content.startswith('`akill'):
 		#	await self.logout()
 		
-
-def create_default_config_if_none_exists():
-	with open('tokens.txt', 'a+') as f:
-		pass
-	with open('admins.txt', 'a+') as f:
-		pass
+class Config:
+	
+	def __init__(self):
+		self.tokens = []
+		self.admin_ids = []
+		self.voice_selection = DEFAULT_VOICE_NAME
+		
+	def open_config(self):
+		try:
+			with open('tokens.txt', 'r') as f:
+				tokens = f.readlines()
+				tokens = [x.strip() for x in tokens]
+				tokens = [x for x in tokens if len(x) > 0]
+				self.tokens = tokens
+		except FileNotFoundError:
+			print('Warn: could not find tokens.txt')
+		
+		try:
+			with open('admins.txt', 'r') as f:
+				admin_ids = f.readlines()
+				admin_ids = [x.strip() for x in admin_ids]
+				admin_ids = [int(x) for x in admin_ids if len(x) > 0]
+				self.admin_ids = admin_ids
+		except FileNotFoundError:
+			print('Warn: could not find admins.txt')
+		
+		try:
+			with open('voice.txt', 'r') as f:
+				voice_id = f.readlines()
+				voice_id = [x.strip() for x in voice_id]
+				voice_id = voice_id[0]
+				self.voice_selection = voice_id
+		except FileNotFoundError:
+			print('Warn: could not find voice.txt')
+		
+	def save_config(self):
+		with open('tokens.txt', 'w+') as f:
+			for x in self.tokens:
+				f.write('{}\n'.format(x))
+		with open('admins.txt', 'w+') as f:
+			for x in self.admin_ids:
+				f.write('{}\n'.format(x))
+		with open('voice.txt', 'w+') as f:
+			f.write(self.voice_selection + '\n')
+	
+def make_voice_from_name(name):
+	name = name.lower()
+	if name == 'festival':
+		return Festival_Voice()
+	elif name == 'pico':
+		return Pico_Voice()
+	elif name == 'gtts':
+		return GTTS_Voice()
+	else:
+		return Custom_Voice(name, Festival_Voice())
+		
+def create_folder_if_none_exists(folder_dir):
+	if not os.path.exists(folder_dir):
+		os.makedirs(folder_dir)
 
 async def main():
-	create_default_config_if_none_exists()
 	
-	tokens = []
-	with open('tokens.txt', 'r') as f:
-		tokens = f.readlines()
-		tokens = [x.strip() for x in tokens]
-		tokens = [x for x in tokens if len(x) > 0]
+	config = Config()
+	config.open_config()
+	config.save_config()
 		
-	admin_ids = []
-	with open('admins.txt', 'r') as f:
-		admin_ids = f.readlines()
-		admin_ids = [x.strip() for x in admin_ids]
-		admin_ids = [int(x) for x in admin_ids if len(x) > 0]
-		
-	print('Tokens: {}'.format(len(tokens)))
-	print('Admins: {}'.format(admin_ids))
+	print('Tokens: {}'.format(len(config.tokens)))
+	print('Admins: {}'.format(config.admin_ids))
 	
-	if len(tokens) == 0:
+	if len(config.tokens) == 0:
 		print('Error: At least one bot token must be provided in tokens.txt')
 		return
 		
-	voice_provider = Custom_Voice('custom', Festival_Voice())
-		
-	bot_controller = Echo_Bot_Controller(tokens, voice_provider, admin_ids)
+	bot_controller = Echo_Bot_Controller(config)
 	await bot_controller.run()
 
 if __name__ == '__main__':
