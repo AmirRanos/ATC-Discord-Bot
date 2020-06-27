@@ -131,6 +131,7 @@ class Echo_Bot(discord.Client):
 					self.greeter_queue.pop_front()
 				except discord.errors.ClientException:
 					await asyncio.sleep(0.1)
+					
 
 	async def on_voice_state_update(self, member, before, after):
 		print(member, before.channel, after.channel)
@@ -165,11 +166,11 @@ class Echo_Bot(discord.Client):
 				self.greeter_queue.add_welcome(display_name)
 			elif announce == 'leave':
 				self.greeter_queue.add_goodbye(display_name)
-				
-			# Small heuristic: if there is only one person left in the room, and we are announcing that they joined,
-			# then wait for a small time so that the voice does not get cut out by latency
-			if sum(1 for x in voice_client.channel.members if not x.bot) == 1:
-				await asyncio.sleep(1)
+			
+			# Adding a bit of delay to when ATC starts talking.
+			# Note that this intentionally does not add a delay
+			# between what is said while emptying the queue of voices
+			await asyncio.sleep(1)
 				
 			await self._process_greeter_queue(voice_client)
 			
@@ -216,11 +217,12 @@ class Echo_Bot(discord.Client):
 
 class Echo_Bot_Controller:
 	
-	def __init__(self, tokens, voice_provider):
+	def __init__(self, tokens, voice_provider, admins):
 		self.tokens = tokens
 		self.voice_provider = voice_provider
 		self.running = True
 		self.worker_bots = {}
+		self.admins = admins
 		
 	async def run(self):
 		await asyncio.gather(*[self.handle_one_bot(token) for token in self.tokens])
@@ -233,12 +235,13 @@ class Echo_Bot_Controller:
 				self.worker_bots[token] = bot
 				
 				async def bot_restarter():
-					while not bot.is_closed():
-						await asyncio.sleep(random.randint(60, 60*60))
+					while not bot.is_closed() and self.running:
 						if not bot.check_is_active():
-							await bot.logout()
-							print('Shutdown bot for inactivity')
-							break
+							if random.randint(0, 60*60) == 0:
+								await bot.logout()
+								print('Shutdown bot for inactivity')
+								break
+						await asyncio.sleep(1)
 				
 				await asyncio.gather(bot.start(token), bot_restarter())
 			except RuntimeError as e:
@@ -282,23 +285,47 @@ class Echo_Bot_Controller:
 	def get_bot_any(self):
 		return self.get_bot_with(lambda x: True)
 		
+	async def shutdown(self):
+		self.running = False
+		print('Shutting down...')
+		for token, bot in self.worker_bots.items():
+			await bot.logout()
+		
+	async def cmd_join(self, message):
+		voice_channel = message.author.voice.channel
+		
+		bot_already_connected = self.get_bot_already_connected(voice_channel)
+		if bot_already_connected is None:
+			bot = self.get_bot_idling()
+			
+			if bot is None:
+				bot = self.get_bot_any()
+				await bot.external_send_message(message.channel, 'No available bots.')
+			else:
+				await bot.external_join_voice_channel(message.author.voice.channel)
+				await bot.external_announce_self(message.author.voice.channel)
+				await bot.external_send_message(message.channel, 'Hello!')
+		
 			
 	async def on_message(self, message):
-		if message.content.startswith('`atc'):
-			voice_channel = message.author.voice.channel
-			
-			bot_already_connected = self.get_bot_already_connected(voice_channel)
-			if bot_already_connected is None:
-				bot = self.get_bot_idling()
-				
-				if bot is None:
-					bot = self.get_bot_any()
-					await bot.external_send_message(message.channel, 'No available bots.')
-				else:
-					await bot.external_join_voice_channel(message.author.voice.channel)
-					await bot.external_announce_self(message.author.voice.channel)
-					await bot.external_send_message(message.channel, 'Hello!')
+		cmd_args = message.content.split(' ')
+		cmd_args = [x for x in cmd_args if len(x) > 0]
 		
+		if len(cmd_args) >= 1 and cmd_args[0] == '`atc':
+			
+			cmd = 'join'
+			
+			if len(cmd_args) >= 2:
+				commands = ['shutdown', 'join']
+				if cmd_args[1].lower() in commands:
+					cmd = cmd_args[1]
+			
+			if cmd == 'shutdown':
+				if message.author.id in self.admins:
+					await self.shutdown()
+			elif cmd == 'join':
+				await self.cmd_join(message)
+			
 		#if message.content.startswith('`akill'):
 		#	await self.logout()
 		
@@ -310,11 +337,18 @@ async def main():
 		tokens = [x.strip() for x in tokens]
 		tokens = [x for x in tokens if len(x) > 0]
 		
+	admin_ids = []
+	with open('admins.txt') as f:
+		admin_ids = f.readlines()
+		admin_ids = [x.strip() for x in admin_ids]
+		admin_ids = [int(x) for x in admin_ids if len(x) > 0]
+		
 	print('Tokens: {}'.format(len(tokens)))
+	print('Admins: {}'.format(admin_ids))
 		
 	voice_provider = Custom_Voice('custom', Festival_Voice())
 		
-	bot_controller = Echo_Bot_Controller(tokens, voice_provider)
+	bot_controller = Echo_Bot_Controller(tokens, voice_provider, admin_ids)
 	await bot_controller.run()
 
 if __name__ == '__main__':
