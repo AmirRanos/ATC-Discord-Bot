@@ -13,10 +13,25 @@ class Voice_Provider:
 	def say(self, msg):
 		raise NotImplementedError()
 
-	def get_output_filename(self):
+	def get_temp_output_filename(self):
 		temp_dir = 'temp'
 		create_folder_if_none_exists(temp_dir)
-		return '{}/voice_{}.wav'.format(temp_dir, random.randint(0, 9999999))
+		return os.path.join(temp_dir, 'voice_{}.wav'.format(random.randint(0, 9999999)))
+	
+	def get_cached_output_filename(self, msg):
+		retval = []
+		msg = msg.lower()
+		for c in msg:
+			if c in 'abcdefghijklmnopqrstuvwxyz ':
+				retval.append(c)
+		return ''.join(retval)
+		
+	def cache_voice(self, directory, messages):
+		create_folder_if_none_exists(directory)
+		
+		for msg in messages:
+			cached_fname = os.path.join(directory, '{}.wav'.format(self.get_cached_output_filename(msg)))
+			self.generate_wave(msg, cached_fname)
 
 	def sanitize(self, string):
 		retval = []
@@ -24,43 +39,47 @@ class Voice_Provider:
 			if c.lower() in 'abcdefghijklmnopqrstuvwxyz0123456789 ,.?!':
 				retval.append(c)
 		return ''.join(retval)
+	
+	def say(self, msg):
+		output_fname = self.get_temp_output_filename()
+		return self.generate_wave(msg, output_fname)
+		
+	def generate_wave(self, msg, output_fname):
+		raise NotImplementedError()
 		
 class Festival_Voice(Voice_Provider):
-	def say(self, msg):
-		output_fname = self.get_output_filename()
-		command = 'echo "{}" | text2wave -eval "(voice_cmu_us_slt_arctic_hts)" -o {}'.format(self.sanitize(msg), output_fname)
+		
+	def generate_wave(self, msg, output_fname):
+		msg = self.sanitize(msg)
+		command = 'echo "{}" | text2wave -eval "(voice_cmu_us_slt_arctic_hts)" -o {}'.format(msg, output_fname)
 		os.system(command)
 		return output_fname
 		
 class GTTS_Voice(Voice_Provider):
-	def say(self, msg):
-		output_fname = self.get_output_filename()
-		tts = gTTS(self.sanitize(msg))
+		
+	def generate_wave(self, msg, output_fname):
+		msg = self.sanitize(msg)
+		tts = gTTS(msg)
 		tts.save(output_fname)
 		return output_fname
 		
 class Pico_Voice(Voice_Provider):
-	def say(self, msg):
-		output_fname = self.get_output_filename()
-		command = 'pico2wave -w {} "{}"'.format(output_fname, self.sanitize(msg))
+		
+	def generate_wave(self, msg, output_fname):
+		msg = self.sanitize(msg)
+		command = 'pico2wave -w {} "{}"'.format(output_fname, msg)
 		os.system(command)
 		return output_fname
 
 class Custom_Voice(Voice_Provider):
+	
 	def __init__(self, file_dir, fallback):
 		self.file_dir = file_dir
 		self.fallback = fallback
 	
-	def get_fname(self, msg):
-		retval = []
-		msg = msg.lower()
-		for c in msg:
-			if c in 'abcdefghijklmnopqrstuvwxyz ':
-				retval.append(c)
-		return ''.join(retval)
-	
 	def say(self, msg):
-		custom_fname = os.path.join(self.file_dir, '{}.wav'.format(self.get_fname(self.sanitize(msg))))
+		msg = self.sanitize(msg)
+		custom_fname = os.path.join(self.file_dir, '{}.wav'.format(self.get_cached_output_filename(msg)))
 		print(custom_fname)
 		if os.path.exists(custom_fname):
 			return custom_fname
