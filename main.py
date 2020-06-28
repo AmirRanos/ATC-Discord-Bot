@@ -353,7 +353,7 @@ class Echo_Bot_Controller:
 				
 				await asyncio.gather(bot.start(token), bot_restarter())
 			except RuntimeError as e:
-				print(e.what)
+				print('Error trying to reboot bot: {}'.format(e.what()))
 			
 	def get_bot_with(self, checker):
 		'''
