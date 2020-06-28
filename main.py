@@ -157,6 +157,9 @@ class Echo_Bot(discord.Client):
 				await self.on_cmd_leave(message, cmd_args)
 		
 	async def on_cmd_join(self, message, cmd_args):
+		# Do not respond if already in use
+		if self.check_is_active():
+			return
 		voice_channel = message.author.voice.channel
 		bot_already_connected = self.controller.get_bot_already_connected(voice_channel)
 		if bot_already_connected is None:
