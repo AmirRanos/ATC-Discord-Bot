@@ -177,6 +177,11 @@ class Echo_Bot(discord.Client):
 					announce = 'join'
 				elif before.channel == voice_client.channel:
 					announce = 'leave'
+				else:
+					# Not relevant for us
+					return
+		else:
+			return
 				
 		if announce is not None:
 			message = ''
@@ -198,7 +203,10 @@ class Echo_Bot(discord.Client):
 			await self._process_greeter_queue(voice_client)
 			
 	async def external_announce_misc(self, voice_channel, msg_text, wait_until_finished=False):
-		voice_client = voice_channel.guild.voice_client
+		voice_client = None
+		for vc in self.voice_clients:
+			if vc.guild == voice_channel.guild:
+				voice_client = vc
 		if voice_client is not None:
 			try:
 				ofname = self.voice_provider.say(msg_text)
@@ -208,18 +216,22 @@ class Echo_Bot(discord.Client):
 					print('Waiting until we finish saying: {}'.format(msg_text))
 					finished = False
 					def after(err):
-						finished = True
+						nonlocal finished
 						print('Done saying: {}'.format(msg_text))
+						finished = True
 					voice_client.play(discord.FFmpegOpusAudio(ofname), after=after)
 					while not finished:
 						await asyncio.sleep(0.1)
 				else:
 					voice_client.play(discord.FFmpegOpusAudio(ofname))
-			except discord.errors.ClientException:
+			except discord.errors.ClientException as e:
+				print('Error occured while announcing message {}: {}'.format(msg_text, e.what()))
 				pass
+		else:
+			print('Could not find voice channel in collectionfor message {}: {}'.format(msg_text, voice_channel.id))
 		
 
-	async def external_join_voice_channel(self, voice_channel):
+	async def external_join_voice_channel(self, voice_channel, wait_until_done=True):
 		
 		voice_client = None
 		for vc in self.voice_clients:
@@ -230,10 +242,15 @@ class Echo_Bot(discord.Client):
 				voice_client = await voice_channel.connect()
 			except discord.client.ClientException as e:
 				pass
+				
+		while True:
+			for vc in self.voice_clients:
+				if vc.guild == voice_channel.guild:
+					return
+			await asyncio.sleep(0.1)
 		return voice_client
 
 	async def external_leave_voice_channel(self, voice_channel, force=False):
-		
 		voice_client = None
 		for vc in self.voice_clients:
 			if vc.guild == voice_channel.guild:
@@ -357,6 +374,7 @@ class Echo_Bot_Controller:
 				await bot.external_send_message(message.channel, 'No available bots.')
 			else:
 				await bot.external_join_voice_channel(message.author.voice.channel)
+				#await asyncio.sleep(1) # needed for some reason, otherwise we can't say anything??
 				await bot.external_announce_misc(message.author.voice.channel, 'ATC Online')
 				await bot.external_send_message(message.channel, 'Hello!')
 				
@@ -366,9 +384,9 @@ class Echo_Bot_Controller:
 		bot_already_connected = self.get_bot_already_connected(voice_channel)
 		if bot_already_connected is not None:
 			bot = bot_already_connected
-			# TODO: fix waiting until ATC has finished saying this
 			await bot.external_announce_misc(message.author.voice.channel, 'ATC going offline', wait_until_finished=True)
-			await bot.external_leave_voice_channel(voice_channel, force=True)
+			await asyncio.sleep(0.1)
+			await bot.external_leave_voice_channel(voice_channel)
 			await bot.external_send_message(message.channel, 'Goodbye!')
 		
 	async def cmd_set_voice(self, message, cmd_args):
