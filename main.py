@@ -152,16 +152,29 @@ class Echo_Bot(discord.Client):
 			elif cmd == 'voice':
 				await self.controller.on_cmd_voice_change(message, cmd_args)
 			elif cmd == 'join':
-				await self.controller.on_cmd_join(message, cmd_args)
+				await self.on_cmd_join(message, cmd_args)
 			elif cmd == 'leave':
 				await self.on_cmd_leave(message, cmd_args)
 		
 	async def on_cmd_join(self, message, cmd_args):
-		await self.join_voice_channel(message.author.voice.channel)
-		await self.announce_misc(message.author.voice.channel, 'ATC Online')
-		await self.send_message(message.channel, 'Hello!')
+		voice_channel = message.author.voice.channel
+		bot_already_connected = self.controller.get_bot_already_connected(voice_channel)
+		if bot_already_connected is None:
+			await self.join_voice_channel(message.author.voice.channel)
+			await self.announce_misc(message.author.voice.channel, 'ATC Online')
+			await self.send_message(message.channel, 'Hello!')
 		
 	async def on_cmd_leave(self, message, cmd_args):
+		voice_channel = message.author.voice.channel
+		relevant = False
+		for vc in self.voice_clients:
+			if vc.guild == voice_channel.guild:
+				relevant = True
+				break
+				
+		if not relevant:
+			return
+		
 		await self.announce_misc(message.author.voice.channel, 'ATC going offline', wait_until_finished=True)
 		await self.leave_voice_channel(message.author.voice.channel)
 		await self.send_message(message.channel, 'Goodbye!')
@@ -383,19 +396,6 @@ class Echo_Bot_Controller:
 		for token, bot in self.worker_bots.items():
 			await bot.logout()
 		
-	async def on_cmd_join(self, message, cmd_args):
-		voice_channel = message.author.voice.channel
-		
-		bot_already_connected = self.get_bot_already_connected(voice_channel)
-		if bot_already_connected is None:
-			bot = self.get_bot_idling()
-			
-			if bot is None:
-				bot = self.get_bot_any()
-				await bot.send_message(message.channel, 'No available bots.')
-			else:
-				await bot.on_cmd_join(message, cmd_args)
-		
 	async def on_cmd_shutdown(self, message, cmd_args):
 		if message.author.id not in self.config.admin_ids:
 			return
@@ -419,37 +419,6 @@ class Echo_Bot_Controller:
 		# In order to ensure that the update reaches all bots
 		for token, bot in self.worker_bots.items():
 			await bot.announce_misc(message.author.voice.channel, 'ATC Online')
-			
-	async def on_message(self, message):
-		cmd_args = message.content.split(' ')
-		cmd_args = [x for x in cmd_args if len(x) > 0]
-		
-		if len(cmd_args) >= 1 and cmd_args[0] == '`atc':
-			
-			if self.last_cmd_message is not None and message.id == self.last_cmd_message.id:
-				return
-			self.last_cmd_message = message
-			
-			cmd = 'join'
-			
-			if len(cmd_args) >= 2:
-				commands = ['shutdown', 'join', 'voice', 'leave']
-				if cmd_args[1].lower() in commands:
-					cmd = cmd_args[1]
-			
-			if cmd == 'shutdown':
-				if message.author.id in self.config.admin_ids:
-					await self.shutdown()
-			elif cmd == 'voice':
-				if message.author.id in self.config.admin_ids:
-					await self.cmd_set_voice(message, cmd_args)
-			elif cmd == 'join':
-				await self.cmd_join(message)
-			elif cmd == 'leave':
-				await self.cmd_leave(message)
-			
-		#if message.content.startswith('`akill'):
-		#	await self.logout()
 		
 class Config:
 	
