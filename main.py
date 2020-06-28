@@ -197,12 +197,24 @@ class Echo_Bot(discord.Client):
 				
 			await self._process_greeter_queue(voice_client)
 			
-	async def external_announce_self(self, voice_channel):
+	async def external_announce_misc(self, voice_channel, msg_text, wait_until_finished=False):
 		voice_client = voice_channel.guild.voice_client
 		if voice_client is not None:
 			try:
-				ofname = self.voice_provider.say('ATC Online')
-				voice_client.play(discord.FFmpegOpusAudio(ofname))
+				ofname = self.voice_provider.say(msg_text)
+				
+				
+				if wait_until_finished:
+					print('Waiting until we finish saying: {}'.format(msg_text))
+					finished = False
+					def after(err):
+						finished = True
+						print('Done saying: {}'.format(msg_text))
+					voice_client.play(discord.FFmpegOpusAudio(ofname), after=after)
+					while not finished:
+						await asyncio.sleep(0.1)
+				else:
+					voice_client.play(discord.FFmpegOpusAudio(ofname))
 			except discord.errors.ClientException:
 				pass
 		
@@ -219,6 +231,21 @@ class Echo_Bot(discord.Client):
 			except discord.client.ClientException as e:
 				pass
 		return voice_client
+
+	async def external_leave_voice_channel(self, voice_channel, force=False):
+		
+		voice_client = None
+		for vc in self.voice_clients:
+			if vc.guild == voice_channel.guild:
+				voice_client = vc
+		if voice_client is not None and voice_client.channel == voice_channel:
+			try:
+				await voice_client.disconnect(force=force)
+			except discord.client.ClientException as e:
+				print('Error trying to disconnect: {}'.format(e.what()))
+				return False
+				
+		return True
 		
 	async def external_send_message(self, text_channel, msg):
 		
@@ -330,8 +357,19 @@ class Echo_Bot_Controller:
 				await bot.external_send_message(message.channel, 'No available bots.')
 			else:
 				await bot.external_join_voice_channel(message.author.voice.channel)
-				await bot.external_announce_self(message.author.voice.channel)
+				await bot.external_announce_misc(message.author.voice.channel, 'ATC Online')
 				await bot.external_send_message(message.channel, 'Hello!')
+				
+	async def cmd_leave(self, message):
+		voice_channel = message.author.voice.channel
+		
+		bot_already_connected = self.get_bot_already_connected(voice_channel)
+		if bot_already_connected is not None:
+			bot = bot_already_connected
+			# TODO: fix waiting until ATC has finished saying this
+			await bot.external_announce_misc(message.author.voice.channel, 'ATC going offline', wait_until_finished=True)
+			await bot.external_leave_voice_channel(voice_channel, force=True)
+			await bot.external_send_message(message.channel, 'Goodbye!')
 		
 	async def cmd_set_voice(self, message, cmd_args):
 		voice = DEFAULT_VOICE_NAME
@@ -348,7 +386,7 @@ class Echo_Bot_Controller:
 		# Done after we set the voice providers
 		# In order to ensure that the update reaches all bots
 		for token, bot in self.worker_bots.items():
-			await bot.external_announce_self(message.author.voice.channel)
+			await bot.external_announce_misc(message.author.voice.channel, 'ATC Online')
 			
 	async def on_message(self, message):
 		cmd_args = message.content.split(' ')
@@ -356,14 +394,14 @@ class Echo_Bot_Controller:
 		
 		if len(cmd_args) >= 1 and cmd_args[0] == '`atc':
 			
-			if message is self.last_cmd_message:
+			if self.last_cmd_message is not None and message.id == self.last_cmd_message.id:
 				return
 			self.last_cmd_message = message
 			
 			cmd = 'join'
 			
 			if len(cmd_args) >= 2:
-				commands = ['shutdown', 'join', 'voice']
+				commands = ['shutdown', 'join', 'voice', 'leave']
 				if cmd_args[1].lower() in commands:
 					cmd = cmd_args[1]
 			
@@ -375,6 +413,8 @@ class Echo_Bot_Controller:
 					await self.cmd_set_voice(message, cmd_args)
 			elif cmd == 'join':
 				await self.cmd_join(message)
+			elif cmd == 'leave':
+				await self.cmd_leave(message)
 			
 		#if message.content.startswith('`akill'):
 		#	await self.logout()
