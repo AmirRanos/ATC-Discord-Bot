@@ -170,8 +170,8 @@ class Echo_Bot(discord.Client):
 	async def on_cmd_leave(self, message, cmd_args):
 		voice_channel = message.author.voice.channel
 		relevant = False
-		for vc in self.voice_clients:
-			if vc.guild == voice_channel.guild:
+		for client in self.voice_clients:
+			if voice_channel == client.channel:
 				relevant = True
 				break
 				
