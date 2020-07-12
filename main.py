@@ -5,6 +5,7 @@ import os
 import random
 import asyncio
 import os.path
+import aiohttp.client_exceptions
 from gtts import gTTS
 
 DEFAULT_VOICE_NAME = 'festival'
@@ -342,14 +343,23 @@ class Echo_Bot_Controller:
 				bot = Echo_Bot(self, self.voice_provider)
 				self.worker_bots[token] = bot
 				
+				bot_crashed = False
+				
 				async def bot_restarter():
-					while not bot.is_closed() and self.running:
+					while not bot.is_closed() and self.running and not bot_crashed:
 						if not bot.check_is_active():
 							if random.randint(0, 60*60) == 0:
 								await bot.logout()
 								print('Shutdown bot for inactivity')
 								break
 						await asyncio.sleep(1)
+						
+				async def bot_starter():
+					try:
+						bot.start(token)
+					except aiohttp.client_exceptions.ClientConnectionError as e:
+						print('Caught aiohttp error: {}'.format(e.what()))
+						bot_crashed = True
 				
 				await asyncio.gather(bot.start(token), bot_restarter())
 			except RuntimeError as e:
