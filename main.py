@@ -362,7 +362,9 @@ class Echo_Bot_Controller:
 						bot_crashed = True
 				
 				await asyncio.gather(bot.start(token), bot_restarter())
-			except RuntimeError as e:
+			except (KeyboardInterrupt, SystemExit):
+				raise
+			except:
 				print('Error trying to reboot bot: {}'.format(e.what()))
 			
 	def get_bot_with(self, checker):
