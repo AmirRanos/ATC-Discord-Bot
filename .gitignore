@@ -1,4 +1,7 @@
 tokens.txt
 admins.txt
 voice.txt
+
+.idea/*
+
 *.wav
