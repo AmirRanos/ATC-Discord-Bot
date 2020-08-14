@@ -4,8 +4,10 @@ import discord
 import os
 import random
 import asyncio
+import sys
 import os.path
 import aiohttp.client_exceptions
+import traceback
 from gtts import gTTS
 
 DEFAULT_VOICE_NAME = 'festival'
@@ -271,7 +273,7 @@ class Echo_Bot(discord.Client):
 				else:
 					voice_client.play(discord.FFmpegOpusAudio(ofname))
 			except discord.errors.ClientException as e:
-				print('Error occured while announcing message {}: {}'.format(msg_text, e.what()))
+				print('Error occured while announcing message {}: {}'.format(msg_text, e))
 				pass
 		else:
 			print('Could not find voice channel in collectionfor message {}: {}'.format(msg_text, voice_channel.id))
@@ -298,7 +300,7 @@ class Echo_Bot(discord.Client):
 			try:
 				await voice_client.disconnect(force=force)
 			except discord.client.ClientException as e:
-				print('Error trying to disconnect: {}'.format(e.what()))
+				print('Error trying to disconnect: {}'.format(e))
 				return False
 				
 		return True
@@ -353,19 +355,16 @@ class Echo_Bot_Controller:
 								print('Shutdown bot for inactivity')
 								break
 						await asyncio.sleep(1)
-						
-				async def bot_starter():
-					try:
-						bot.start(token)
-					except aiohttp.client_exceptions.ClientConnectionError as e:
-						print('Caught aiohttp error: {}'.format(e.what()))
-						bot_crashed = True
 				
 				await asyncio.gather(bot.start(token), bot_restarter())
 			except (KeyboardInterrupt, SystemExit):
 				raise
 			except:
-				print('Error trying to reboot bot: {}'.format(e.what()))
+				e = sys.exc_info()[0]
+				print('Error trying to reboot bot: {}'.format(e))
+				traceback.print_exc()
+				print('Sleeping for 5 minutes before rebooting...')
+				await asyncio.sleep(60*5)
 			
 	def get_bot_with(self, checker):
 		'''
