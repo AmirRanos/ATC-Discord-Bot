@@ -14,9 +14,6 @@ DEFAULT_VOICE_NAME = 'festival'
 
 
 class Voice_Provider:
-    def say(self, msg):
-        raise NotImplementedError()
-
     def get_temp_output_filename(self):
         temp_dir = 'temp'
         create_folder_if_none_exists(temp_dir)
@@ -107,32 +104,40 @@ class Greeter_Queue:
         if len(self._queue) == 0:
             return None
 
-        return ''.join(self._queue.pop(0))
+        return self._queue.pop(0)
 
     def peek_front(self):
         if len(self._queue) == 0:
             return None
 
-        return ''.join(self._queue[0])
+        return self._queue[0]
 
     def clear_all(self):
         self._queue.clear()
 
-    def add_welcome(self, name):
-        self._erase_element(('Goodbye ', name))
-        self._queue.append(('Welcome ', name))
+    def _make_welcome_message(self, name):
+        return ''.join(['Welcome ', name])
 
-    def add_goodbye(self, name):
-        self._erase_element(('Welcome ', name))
-        self._queue.append(('Goodbye ', name))
+    def _make_goodbye_message(self, name):
+        return ''.join(['Goodbye ', name])
+
+    def add_welcome(self, name, is_vip):
+        self._erase_element((self._make_goodbye_message(name), is_vip))
+        self._queue.append((self._make_welcome_message(name), is_vip))
+
+    def add_goodbye(self, name, is_vip):
+        self._erase_element((self._make_welcome_message(name), is_vip))
+        self._queue.append((self._make_goodbye_message(name), is_vip))
 
 
 class Echo_Bot(discord.Client):
 
-    def __init__(self, controller, voice_provider, priority=0):
+    def __init__(self, controller, voice_provider, vip_voice_provider, vip_list, priority=0):
         self.priority = priority
         self.controller = controller
         self.voice_provider = voice_provider
+        self.vip_voice_provider = vip_voice_provider
+        self.vip_list = vip_list
         self.greeter_queue = Greeter_Queue()
         super().__init__()
 
@@ -172,7 +177,7 @@ class Echo_Bot(discord.Client):
         bot_already_connected = self.controller.get_bot_already_connected(voice_channel)
         if bot_already_connected is None:
             await self.join_voice_channel(message.author.voice.channel)
-            await self.announce_misc(message.author.voice.channel, 'ATC Online')
+            await self.announce_special(message.author.voice.channel, 'ATC Online')
             await self.send_message(message.channel, 'Hello!')
 
     async def on_cmd_leave(self, message, cmd_args):
@@ -186,13 +191,13 @@ class Echo_Bot(discord.Client):
         if not relevant:
             return
 
-        await self.announce_misc(message.author.voice.channel, 'ATC going offline', wait_until_finished=True)
+        await self.announce_special(message.author.voice.channel, 'ATC going offline', wait_until_finished=True)
         await self.leave_voice_channel(message.author.voice.channel)
         await self.send_message(message.channel, 'Goodbye!')
 
     async def _process_greeter_queue(self, voice_client):
         while self.greeter_queue.peek_front() is not None:
-            message = self.greeter_queue.peek_front()
+            message, is_vip = self.greeter_queue.peek_front()
             while voice_client.is_playing():
                 await asyncio.sleep(0.1)
 
@@ -201,7 +206,10 @@ class Echo_Bot(discord.Client):
                 self.greeter_queue.clear_all()
                 print('Clearing queue since nobody is there to hear anything')
             else:
-                ofname = self.voice_provider.say(message)
+                if is_vip:
+                    ofname = self.vip_voice_provider.say(message)
+                else:
+                    ofname = self.voice_provider.say(message)
                 try:
                     voice_client.play(discord.FFmpegOpusAudio(ofname))
                     self.greeter_queue.pop_front()
@@ -241,10 +249,12 @@ class Echo_Bot(discord.Client):
             if member.bot:
                 display_name = 'service droid'
 
+            is_vip = (member.id, display_name) in self.vip_list
+
             if announce == 'join':
-                self.greeter_queue.add_welcome(display_name)
+                self.greeter_queue.add_welcome(display_name, is_vip)
             elif announce == 'leave':
-                self.greeter_queue.add_goodbye(display_name)
+                self.greeter_queue.add_goodbye(display_name, is_vip)
 
             # Adding a bit of delay to when ATC starts talking.
             # Note that this intentionally does not add a delay
@@ -253,14 +263,14 @@ class Echo_Bot(discord.Client):
 
             await self._process_greeter_queue(voice_client)
 
-    async def announce_misc(self, voice_channel, msg_text, wait_until_finished=False):
+    async def announce_special(self, voice_channel, msg_text, wait_until_finished=False):
         voice_client = None
         for vc in self.voice_clients:
             if vc.guild == voice_channel.guild:
                 voice_client = vc
         if voice_client is not None:
             try:
-                ofname = self.voice_provider.say(msg_text)
+                ofname = self.vip_voice_provider.say(msg_text)
 
                 if wait_until_finished:
                     print('Waiting until we finish saying: {}'.format(msg_text))
@@ -277,10 +287,10 @@ class Echo_Bot(discord.Client):
                 else:
                     voice_client.play(discord.FFmpegOpusAudio(ofname))
             except discord.errors.ClientException as e:
-                print('Error occured while announcing message {}: {}'.format(msg_text, e))
+                print('Error occurred while announcing message {}: {}'.format(msg_text, e))
                 pass
         else:
-            print('Could not find voice channel in collectionfor message {}: {}'.format(msg_text, voice_channel.id))
+            print('Could not find voice channel in collection for message {}: {}'.format(msg_text, voice_channel.id))
 
     async def join_voice_channel(self, voice_channel):
         voice_client = None
@@ -337,6 +347,7 @@ class Echo_Bot_Controller:
         self.config = config
         self.running = True
         self.voice_provider = make_voice_from_name(self.config.voice_selection)
+        self.vip_voice_provider = make_voice_from_name(self.config.vip_voice_selection)
         self.worker_bots = {}
 
     async def run(self):
@@ -346,7 +357,7 @@ class Echo_Bot_Controller:
         while self.running:
             try:
                 print('Starting worker bot...')
-                bot = Echo_Bot(self, self.voice_provider)
+                bot = Echo_Bot(self, self.voice_provider, self.vip_voice_provider, self.config.vip_list)
                 self.worker_bots[token] = bot
 
                 bot_crashed = False
@@ -438,7 +449,7 @@ class Echo_Bot_Controller:
         # Done after we set the voice providers
         # In order to ensure that the update reaches all bots
         for token, bot in self.worker_bots.items():
-            await bot.announce_misc(message.author.voice.channel, 'ATC Online')
+            await bot.announce_special(message.author.voice.channel, 'ATC Online')
 
 
 class Config:
@@ -446,7 +457,9 @@ class Config:
     def __init__(self):
         self.tokens = []
         self.admin_ids = []
+        self.vip_list = []
         self.voice_selection = DEFAULT_VOICE_NAME
+        self.vip_voice_selection = DEFAULT_VOICE_NAME
 
     def open_config(self):
         try:
@@ -468,11 +481,28 @@ class Config:
             print('Warn: could not find admins.txt')
 
         try:
+            with open('vips.txt', 'r') as f:
+                vip_raw = f.readlines()
+                vip_raw = [x.strip() for x in vip_raw]
+
+                vip_list = []
+                for line in vip_raw:
+                    id_str, name = line.split('\t', 1)
+                    vip_list.append((int(id_str), name))
+                self.vip_list = vip_list
+        except FileNotFoundError:
+            print('Warn: could not find vips.txt')
+
+        try:
             with open('voice.txt', 'r') as f:
                 voice_id = f.readlines()
                 voice_id = [x.strip() for x in voice_id]
-                voice_id = voice_id[0]
-                self.voice_selection = voice_id
+                if len(voice_id) >= 1:
+                    self.voice_selection = voice_id[0]
+                if len(voice_id) >= 2:
+                    self.vip_voice_selection = voice_id[1]
+                else:
+                    self.vip_voice_selection = self.voice_selection
         except FileNotFoundError:
             print('Warn: could not find voice.txt')
 
@@ -485,6 +515,7 @@ class Config:
                 f.write('{}\n'.format(x))
         with open('voice.txt', 'w+') as f:
             f.write(self.voice_selection + '\n')
+            f.write(self.vip_voice_selection + '\n')
 
 
 def make_voice_from_name(name):
@@ -511,6 +542,9 @@ async def main():
 
     print('Tokens: {}'.format(len(config.tokens)))
     print('Admins: {}'.format(config.admin_ids))
+
+    print('VIP voice: {}'.format(config.vip_voice_selection))
+    print('Default voice: {}'.format(config.voice_selection))
 
     if len(config.tokens) == 0:
         print('Error: At least one bot token must be provided in tokens.txt')
