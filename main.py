@@ -8,6 +8,7 @@ import sys
 import os.path
 import aiohttp.client_exceptions
 import traceback
+import json
 from gtts import gTTS
 
 DEFAULT_VOICE_NAME = 'festival'
@@ -132,7 +133,8 @@ class Greeter_Queue:
 
 class Echo_Bot(discord.Client):
 
-    def __init__(self, controller, voice_provider, vip_voice_provider, vip_list, priority=0):
+    def __init__(self, config, controller, voice_provider, vip_voice_provider, vip_list, priority=0):
+        self.config = config
         self.priority = priority
         self.controller = controller
         self.voice_provider = voice_provider
@@ -144,6 +146,24 @@ class Echo_Bot(discord.Client):
     async def on_ready(self):
         print('Logged in as {}'.format(self.user))
 
+    def resolve_command(self, cmd_args):
+        
+        if len(cmd_args) >= 1 and cmd_args[0] == '`atc':
+
+            if len(cmd_args) >= 2:
+                cmd = cmd_args[1].lower()
+            else:
+                cmd = 'join'
+            
+            aliases = self.config.advanced_data['aliases']
+            
+            if cmd in aliases:
+                cmd = aliases[cmd]
+                
+            return cmd
+        else:
+            return None
+
     async def on_message(self, message):
         if message.author.bot:
             return
@@ -151,23 +171,16 @@ class Echo_Bot(discord.Client):
         cmd_args = message.content.split(' ')
         cmd_args = [x for x in cmd_args if len(x) > 0]
 
-        if len(cmd_args) >= 1 and cmd_args[0] == '`atc':
+        cmd = self.resolve_command(cmd_args)
 
-            cmd = 'join'
-
-            if len(cmd_args) >= 2:
-                commands = ['shutdown', 'join', 'voice', 'leave']
-                if cmd_args[1].lower() in commands:
-                    cmd = cmd_args[1]
-
-            if cmd == 'shutdown':
-                await self.controller.on_cmd_shutdown(message, cmd_args)
-            elif cmd == 'voice':
-                await self.controller.on_cmd_voice_change(message, cmd_args)
-            elif cmd == 'join':
-                await self.on_cmd_join(message, cmd_args)
-            elif cmd == 'leave':
-                await self.on_cmd_leave(message, cmd_args)
+        if cmd == 'shutdown':
+            await self.controller.on_cmd_shutdown(message, cmd_args)
+        elif cmd == 'voice':
+            await self.controller.on_cmd_voice_change(message, cmd_args)
+        elif cmd == 'join':
+            await self.on_cmd_join(message, cmd_args)
+        elif cmd == 'leave':
+            await self.on_cmd_leave(message, cmd_args)
 
     async def on_cmd_join(self, message, cmd_args):
         # Do not respond if already in use
@@ -357,7 +370,7 @@ class Echo_Bot_Controller:
         while self.running:
             try:
                 print('Starting worker bot...')
-                bot = Echo_Bot(self, self.voice_provider, self.vip_voice_provider, self.config.vip_list)
+                bot = Echo_Bot(self.config, self, self.voice_provider, self.vip_voice_provider, self.config.vip_list)
                 self.worker_bots[token] = bot
 
                 bot_crashed = False
@@ -460,6 +473,12 @@ class Config:
         self.vip_list = []
         self.voice_selection = DEFAULT_VOICE_NAME
         self.vip_voice_selection = DEFAULT_VOICE_NAME
+        self.advanced_data = {
+            'aliases' : {
+                'connect' : 'join',
+                'disconnect' : 'leave',
+            },
+        }
 
     def open_config(self):
         try:
@@ -505,6 +524,13 @@ class Config:
                     self.vip_voice_selection = self.voice_selection
         except FileNotFoundError:
             print('Warn: could not find voice.txt')
+            
+        try:
+            with open('advanced.json', 'r') as f:
+                self.advanced_data = json.load(f)
+        except FileNotFoundError:
+            print('Warn: could not find advanced.json')
+            
 
     def save_config(self):
         with open('tokens.txt', 'w+') as f:
@@ -516,6 +542,8 @@ class Config:
         with open('voice.txt', 'w+') as f:
             f.write(self.voice_selection + '\n')
             f.write(self.vip_voice_selection + '\n')
+        with open('advanced.json', 'w+') as f:
+            json.dump(self.advanced_data, f, indent=4)
 
 
 def make_voice_from_name(name):
